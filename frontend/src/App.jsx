@@ -44,6 +44,7 @@ const App = () => {
   const [liveMar, setLiveMar] = useState(0.15);
   const [blinksPerMinute, setBlinksPerMinute] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [isFlashlightMode, setIsFlashlightMode] = useState(false);
   
   // Backend dynamic features
   const [recommendations, setRecommendations] = useState([
@@ -97,14 +98,18 @@ const App = () => {
   const latestMarRef = useRef(0.15);
   const neutralEarRef = useRef(0.28);
   const neutralMarRef = useRef(0.15);
+  const lastFaceDetectTime = useRef(Date.now());
+  const lumaCanvasRef = useRef(document.createElement('canvas'));
 
   const isCalibratingRef = useRef(isCalibrating);
   const calibrationStepRef = useRef(calibrationStep);
   const soundMutedRef = useRef(soundMuted);
+  const isFlashlightModeRef = useRef(isFlashlightMode);
 
   useEffect(() => { isCalibratingRef.current = isCalibrating; }, [isCalibrating]);
   useEffect(() => { calibrationStepRef.current = calibrationStep; }, [calibrationStep]);
   useEffect(() => { soundMutedRef.current = soundMuted; }, [soundMuted]);
+  useEffect(() => { isFlashlightModeRef.current = isFlashlightMode; }, [isFlashlightMode]);
 
   // Splash Screen Timeout
   useEffect(() => {
@@ -298,6 +303,8 @@ const App = () => {
 
     if (!results.multiFaceLandmarks || results.multiFaceLandmarks.length === 0) return;
     
+    lastFaceDetectTime.current = Date.now();
+    
     const landmarks = results.multiFaceLandmarks[0];
     const filterValid = (arr) => arr.filter(p => p !== undefined && p !== null);
     const leftEye = filterValid(EYE_INDICES.left.map(i => landmarks[i]));
@@ -373,11 +380,49 @@ const App = () => {
   useEffect(() => {
     const faceMesh = setupFaceMesh(onResults);
     let videoElement = null;
+    
+    // Setup lightweight canvas for Luma tracking
+    const lumaCtx = lumaCanvasRef.current.getContext('2d', { willReadFrequently: true });
+    lumaCanvasRef.current.width = 64; 
+    lumaCanvasRef.current.height = 48;
+
     const interval = setInterval(() => {
       if (webcamRef.current && webcamRef.current.video) {
         videoElement = webcamRef.current.video;
         if (videoElement.readyState === 4) {
           faceMesh.send({ image: videoElement });
+          
+          // Live Luma (Brightness) Tracking
+          try {
+            lumaCtx.drawImage(videoElement, 0, 0, 64, 48);
+            const imgData = lumaCtx.getImageData(0, 0, 64, 48).data;
+            let totalLuma = 0;
+            for (let i = 0; i < imgData.length; i += 4) {
+              totalLuma += (0.2126 * imgData[i] + 0.7152 * imgData[i+1] + 0.0722 * imgData[i+2]);
+            }
+            const avgLuma = totalLuma / (64 * 48);
+            
+            const isDark = avgLuma < 25 || (isFlashlightModeRef.current && avgLuma < 35);
+            if (isDark !== isFlashlightModeRef.current) {
+              setIsFlashlightMode(isDark);
+              if (isDark) {
+                addLog("Low Light Detected: Auto-Flashlight Active", "warning");
+              } else {
+                addLog("Light Restored: Flashlight Mode Disabled", "success");
+                lastFaceDetectTime.current = Date.now(); // Reset timer upon light restoration
+              }
+            }
+            
+            // Anti-Cheating Evasion Penalty
+            if (isDark && (Date.now() - lastFaceDetectTime.current > 3000)) {
+               if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                 ws.current.send(JSON.stringify({
+                   faceMissingInDarkness: true,
+                   timestamp: Date.now()
+                 }));
+               }
+            }
+          } catch(e) {}
         }
       }
     }, 100);
@@ -504,6 +549,20 @@ const App = () => {
       
       {/* Neural Network Particle Background */}
       <ParticleCanvas />
+      
+      {/* Auto-Flashlight Mode Overlay */}
+      <AnimatePresence>
+        {isFlashlightMode && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            transition={{ duration: 0.5 }}
+            className="fixed inset-0 bg-white pointer-events-none" 
+            style={{ zIndex: 5 }}
+          />
+        )}
+      </AnimatePresence>
       
       {/* Keyboard Shortcuts */}
       <KeyboardShortcuts

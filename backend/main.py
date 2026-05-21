@@ -246,6 +246,7 @@ async def fatigue_websocket(websocket: WebSocket):
             is_calibrating = message.get("isCalibrating", False)
             calibration_step = message.get("calibrationStep", "none")
             reaction_time = message.get("reactionTime")
+            face_missing = message.get("faceMissingInDarkness", False)
 
             if reaction_time is not None:
                 session["last_reaction_time"] = reaction_time
@@ -339,7 +340,7 @@ async def fatigue_websocket(websocket: WebSocket):
             was_calibrating = is_calibrating
             
             # Calculate CLI relative to active baseline
-            cli, triggers = engine.get_cli_score(avg_ear, mar, stability, session["last_reaction_time"])
+            cli, triggers = engine.get_cli_score(avg_ear, mar, stability, session["last_reaction_time"], face_missing_in_darkness=face_missing)
             
             # Adjust CLI based on deviation from baseline
             baseline_ear_val = session["baseline_ear"]
