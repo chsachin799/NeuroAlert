@@ -122,14 +122,8 @@ const ParticleCanvas = ({ className = '' }) => {
             ctx.moveTo(particles[i].x, particles[i].y);
             ctx.lineTo(particles[j].x, particles[j].y);
             
-            const gradient = ctx.createLinearGradient(
-              particles[i].x, particles[i].y,
-              particles[j].x, particles[j].y
-            );
-            gradient.addColorStop(0, `hsla(${particles[i].hue}, 100%, 55%, ${alpha})`);
-            gradient.addColorStop(1, `hsla(${particles[j].hue}, 100%, 55%, ${alpha})`);
-            
-            ctx.strokeStyle = gradient;
+            const avgHue = Math.round((particles[i].hue + particles[j].hue) / 2);
+            ctx.strokeStyle = `hsla(${avgHue}, 100%, 55%, ${alpha})`;
             ctx.lineWidth = 0.8;
             ctx.stroke();
           }

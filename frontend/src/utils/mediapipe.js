@@ -33,3 +33,10 @@ export const IRIS_INDICES = {
 // 0: left corner, 1: upper-left, 2: upper-center, 3: upper-right,
 // 4: right corner, 5: lower-right, 6: lower-center, 7: lower-left
 export const MOUTH_INDICES = [78, 82, 13, 312, 308, 317, 14, 87];
+
+// Indices for basic Head Pose Estimation (Micro-Nods)
+export const HEAD_POSE_INDICES = {
+  nose: 1,
+  chin: 152,
+  forehead: 10
+};

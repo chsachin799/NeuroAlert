@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
-import { setupFaceMesh, EYE_INDICES, MOUTH_INDICES, IRIS_INDICES } from './utils/mediapipe';
+import { setupFaceMesh, EYE_INDICES, MOUTH_INDICES, IRIS_INDICES, HEAD_POSE_INDICES } from './utils/mediapipe';
 
 // New components
 import CircularGauge from './components/CircularGauge';
@@ -15,6 +15,8 @@ import ParticleCanvas from './components/ParticleCanvas';
 import BiometricPanel from './components/BiometricPanel';
 import FocusTimer from './components/FocusTimer';
 import KeyboardShortcuts from './components/KeyboardShortcuts';
+import BrainGame from './components/BrainGame';
+import InsightsHeatmap from './components/InsightsHeatmap';
 
 const App = () => {
   // Application UI states
@@ -45,6 +47,8 @@ const App = () => {
   const [blinksPerMinute, setBlinksPerMinute] = useState(0);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [isFlashlightMode, setIsFlashlightMode] = useState(false);
+  const [flashlightStyle, setFlashlightStyle] = useState('stark');
+  const [showBrainGame, setShowBrainGame] = useState(false);
   
   // Backend dynamic features
   const [recommendations, setRecommendations] = useState([
@@ -100,6 +104,9 @@ const App = () => {
   const neutralMarRef = useRef(0.15);
   const lastFaceDetectTime = useRef(Date.now());
   const lumaCanvasRef = useRef(document.createElement('canvas'));
+  const lastFlashlightToggleTime = useRef(0);
+  const lastChartUpdateTime = useRef(0);
+  const activeTriggersRef = useRef([]);
 
   const isCalibratingRef = useRef(isCalibrating);
   const calibrationStepRef = useRef(calibrationStep);
@@ -111,6 +118,22 @@ const App = () => {
   useEffect(() => { soundMutedRef.current = soundMuted; }, [soundMuted]);
   useEffect(() => { isFlashlightModeRef.current = isFlashlightMode; }, [isFlashlightMode]);
 
+  const calculateLuma = (videoElement) => {
+    const canvas = lumaCanvasRef.current;
+    if (canvas.width !== 64 || canvas.height !== 48) {
+      canvas.width = 64;
+      canvas.height = 48;
+    }
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(videoElement, 0, 0, 64, 48);
+    const imgData = ctx.getImageData(0, 0, 64, 48).data;
+    let totalLuma = 0;
+    for (let i = 0; i < imgData.length; i += 4) {
+      totalLuma += (0.2126 * imgData[i] + 0.7152 * imgData[i+1] + 0.0722 * imgData[i+2]);
+    }
+    return totalLuma / (64 * 48);
+  };
+
   // Splash Screen Timeout
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -118,6 +141,32 @@ const App = () => {
     }, 3500);
     return () => clearTimeout(timer);
   }, []);
+
+  // Save history to localStorage for Heatmap
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const stored = localStorage.getItem('neuroalert_history');
+      let history = stored ? JSON.parse(stored) : {};
+      
+      const now = new Date();
+      const dayStr = now.toISOString().split('T')[0];
+      const hourStr = now.getHours().toString();
+      
+      if (!history[dayStr]) history[dayStr] = {};
+      
+      // Moving average update for the hour
+      const prevScore = history[dayStr][hourStr];
+      if (prevScore) {
+        history[dayStr][hourStr] = (prevScore + cliScore) / 2;
+      } else {
+        history[dayStr][hourStr] = cliScore;
+      }
+      
+      localStorage.setItem('neuroalert_history', JSON.stringify(history));
+    }, 60000); // Save every 1 minute
+    
+    return () => clearInterval(interval);
+  }, [cliScore]);
 
   const addLog = (msg, type = 'info') => {
     setActivityLogs(prev => {
@@ -191,6 +240,35 @@ const App = () => {
     }
   };
 
+  const playNotificationSound = (type = 'info') => {
+    if (soundMutedRef.current) return;
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      osc.type = 'sine';
+      if (type === 'success') {
+        osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+        osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.1); // E5
+      } else {
+        osc.frequency.setValueAtTime(349.23, audioCtx.currentTime); // F4
+        osc.frequency.setValueAtTime(440.00, audioCtx.currentTime + 0.1); // A4
+      }
+      
+      gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+      gainNode.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 0.05);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.25);
+      
+      osc.connect(gainNode);
+      gainNode.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } catch (err) {
+      console.warn("Audio blocked", err);
+    }
+  };
+
   useEffect(() => {
     const host = window.location.hostname || 'localhost';
     ws.current = new WebSocket(`ws://${host}:8080/ws/fatigue`);
@@ -230,12 +308,14 @@ const App = () => {
         // Handle Triggers Logging
         if (data.triggers && data.triggers.length > 0) {
           data.triggers.forEach(t => {
-            if (!triggers.includes(t)) {
+            if (!activeTriggersRef.current.includes(t)) {
               addLog(`Detected: ${t}`, 'warning');
             }
           });
+          activeTriggersRef.current = data.triggers;
           setTriggers(data.triggers);
         } else {
+          activeTriggersRef.current = [];
           setTriggers([]);
         }
 
@@ -267,23 +347,33 @@ const App = () => {
           setShowCriticalFlash(true);
           setTimeout(() => setShowCriticalFlash(false), 200);
         }
+        
+        // Auto-trigger Brain Game if critical and not already shown
+        if (data.cli > 85 && !showBrainGame && Math.random() > 0.95) {
+          setShowBrainGame(true);
+          addLog("Critical Fatigue: Cognitive Test Triggered", "warning");
+        }
 
-        setHistory(prev => {
-          const now = new Date();
-          const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          const newEntry = { time: timeStr, score: Math.round(data.cli), isPredicted: false };
-          const baseHistory = [...prev.filter(h => !h.isPredicted), newEntry].slice(-30);
-          
-          const predictedEntries = (data.predictions || []).map((p, i) => {
-            const predTime = new Date(now.getTime() + (i + 1) * 30000); 
-            return {
-              time: predTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-              score: Math.round(p),
-              isPredicted: true
-            };
+        const nowTime = Date.now();
+        if (nowTime - lastChartUpdateTime.current >= 1500) {
+          lastChartUpdateTime.current = nowTime;
+          setHistory(prev => {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const newEntry = { time: timeStr, score: Math.round(data.cli), isPredicted: false };
+            const baseHistory = [...prev.filter(h => !h.isPredicted), newEntry].slice(-30);
+            
+            const predictedEntries = (data.predictions || []).map((p, i) => {
+              const predTime = new Date(now.getTime() + (i + 1) * 30000); 
+              return {
+                time: predTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                score: Math.round(p),
+                isPredicted: true
+              };
+            });
+            return [...baseHistory, ...predictedEntries];
           });
-          return [...baseHistory, ...predictedEntries];
-        });
+        }
       }
     };
 
@@ -312,12 +402,19 @@ const App = () => {
     const leftIris = filterValid(IRIS_INDICES.left.map(i => landmarks[i]));
     const rightIris = filterValid(IRIS_INDICES.right.map(i => landmarks[i]));
     const mouth = filterValid(MOUTH_INDICES.map(i => landmarks[i]));
+    
+    // Head Pose Estimation landmarks
+    const nose = landmarks[HEAD_POSE_INDICES.nose];
+    const chin = landmarks[HEAD_POSE_INDICES.chin];
+    const forehead = landmarks[HEAD_POSE_INDICES.forehead];
 
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       ws.current.send(JSON.stringify({
         leftEye, rightEye, leftIris, rightIris, mouth,
+        nose, chin, forehead,
         isCalibrating: isCalibratingRef.current,
         calibrationStep: calibrationStepRef.current,
+        faceMissingInDarkness: false,
         timestamp: Date.now()
       }));
     }
@@ -341,7 +438,7 @@ const App = () => {
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.shadowColor = glowColor || color;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = 4; // Optimized from 12 for high performance rendering
         ctx.moveTo(points[0].x * canvasElement.width, points[0].y * canvasElement.height);
         for (let i = 1; i < points.length; i++) {
           ctx.lineTo(points[i].x * canvasElement.width, points[i].y * canvasElement.height);
@@ -357,7 +454,7 @@ const App = () => {
         ctx.beginPath();
         ctx.fillStyle = color;
         ctx.shadowColor = color;
-        ctx.shadowBlur = 15;
+        ctx.shadowBlur = 5; // Optimized from 15 for high performance rendering
         ctx.arc(center.x * canvasElement.width, center.y * canvasElement.height, 4, 0, 2 * Math.PI);
         ctx.fill();
         ctx.shadowBlur = 0;
@@ -380,49 +477,57 @@ const App = () => {
   useEffect(() => {
     const faceMesh = setupFaceMesh(onResults);
     let videoElement = null;
-    
-    // Setup lightweight canvas for Luma tracking
-    const lumaCtx = lumaCanvasRef.current.getContext('2d', { willReadFrequently: true });
-    lumaCanvasRef.current.width = 64; 
-    lumaCanvasRef.current.height = 48;
+    let lastLumaCheck = 0;
+    let isProcessing = false;
 
-    const interval = setInterval(() => {
+    const interval = setInterval(async () => {
       if (webcamRef.current && webcamRef.current.video) {
         videoElement = webcamRef.current.video;
         if (videoElement.readyState === 4) {
-          faceMesh.send({ image: videoElement });
+          if (!isProcessing) {
+            isProcessing = true;
+            try {
+              await faceMesh.send({ image: videoElement });
+            } catch (err) {
+              console.warn("FaceMesh processing error:", err);
+            } finally {
+              isProcessing = false;
+            }
+          }
           
-          // Live Luma (Brightness) Tracking
-          try {
-            lumaCtx.drawImage(videoElement, 0, 0, 64, 48);
-            const imgData = lumaCtx.getImageData(0, 0, 64, 48).data;
-            let totalLuma = 0;
-            for (let i = 0; i < imgData.length; i += 4) {
-              totalLuma += (0.2126 * imgData[i] + 0.7152 * imgData[i+1] + 0.0722 * imgData[i+2]);
-            }
-            const avgLuma = totalLuma / (64 * 48);
-            
-            const isDark = avgLuma < 25 || (isFlashlightModeRef.current && avgLuma < 35);
-            if (isDark !== isFlashlightModeRef.current) {
-              setIsFlashlightMode(isDark);
-              if (isDark) {
-                addLog("Low Light Detected: Auto-Flashlight Active", "warning");
-              } else {
-                addLog("Light Restored: Flashlight Mode Disabled", "success");
-                lastFaceDetectTime.current = Date.now(); // Reset timer upon light restoration
+          const nowTime = Date.now();
+          if (nowTime - lastLumaCheck >= 500) {
+            lastLumaCheck = nowTime;
+            // Live Luma (Brightness) Tracking
+            try {
+              const avgLuma = calculateLuma(videoElement);
+              
+              const isDark = avgLuma < 40 || (isFlashlightModeRef.current && avgLuma < 45);
+              const nowToggle = Date.now();
+              if (isDark !== isFlashlightModeRef.current && (nowToggle - lastFlashlightToggleTime.current > 3000)) {
+                setIsFlashlightMode(isDark);
+                lastFlashlightToggleTime.current = nowToggle;
+                if (isDark) {
+                  addLog("Low Light Detected: Flashlight Mode Active", "warning");
+                  playNotificationSound('warning');
+                } else {
+                  addLog("Light Restored: Flashlight Mode Disabled", "success");
+                  playNotificationSound('success');
+                  lastFaceDetectTime.current = Date.now(); // Reset timer upon light restoration
+                }
               }
-            }
-            
-            // Anti-Cheating Evasion Penalty
-            if (isDark && (Date.now() - lastFaceDetectTime.current > 3000)) {
-               if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-                 ws.current.send(JSON.stringify({
-                   faceMissingInDarkness: true,
-                   timestamp: Date.now()
-                 }));
-               }
-            }
-          } catch(e) {}
+              
+              // Anti-Cheating Evasion Penalty
+              if (isDark && (Date.now() - lastFaceDetectTime.current > 3000)) {
+                 if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                   ws.current.send(JSON.stringify({
+                     faceMissingInDarkness: true,
+                     timestamp: Date.now()
+                   }));
+                 }
+              }
+            } catch(e) {}
+          }
         }
       }
     }, 100);
@@ -558,9 +663,66 @@ const App = () => {
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
             transition={{ duration: 0.5 }}
-            className="fixed inset-0 bg-white pointer-events-none" 
-            style={{ zIndex: 5 }}
+            className="fixed inset-0 pointer-events-none" 
+            style={{ 
+              zIndex: 5, 
+              background: flashlightStyle === 'stark' 
+                ? '#ffffff' 
+                : 'radial-gradient(circle, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.85) 45%, rgba(255,255,255,0.1) 85%)',
+              opacity: flashlightStyle === 'stark' ? 0.95 : 1.0,
+              filter: flashlightStyle === 'stark' ? 'none' : 'blur(4px)'
+            }}
           />
+        )}
+      </AnimatePresence>
+
+      {/* Flashlight Mode Alert Toast */}
+      <AnimatePresence>
+        {isFlashlightMode && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50, scale: 0.9 }} 
+            animate={{ opacity: 1, y: 0, scale: 1 }} 
+            exit={{ opacity: 0, y: -50, scale: 0.9 }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            className="fixed top-24 left-1/2 transform -translate-x-1/2 z-[80] px-6 py-3 bg-white text-black font-extrabold rounded-full shadow-[0_0_35px_rgba(255,255,255,0.9)] border border-slate-200 flex items-center gap-2.5 text-xs uppercase tracking-widest pointer-events-none"
+          >
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-ping"></span>
+            <span>Low Light Detected: Flashlight Mode Active</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      {/* Melatonin Suppressor (Blue Light Therapy) Overlay */}
+      <AnimatePresence>
+        {cliScore > 75 && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 0.25 }} 
+            exit={{ opacity: 0 }} 
+            transition={{ duration: 2 }}
+            className="fixed inset-0 bg-[#0044ff] pointer-events-none mix-blend-screen" 
+            style={{ zIndex: 6 }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Brain Game Modal */}
+      <AnimatePresence>
+        {showBrainGame && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90]"
+              onClick={() => setShowBrainGame(false)}
+            />
+            <BrainGame 
+              onClose={() => setShowBrainGame(false)} 
+              onComplete={(score) => {
+                addLog(`Cognitive Test Complete: Score ${score}`, 'success');
+                setTimeout(() => setShowBrainGame(false), 4000);
+              }}
+            />
+          </>
         )}
       </AnimatePresence>
       
@@ -850,18 +1012,22 @@ const App = () => {
             <CircularGauge value={cliScore} size={200} label="Fatigue Index" status={status} />
           </div>
 
-          {/* Live Biometric Panel */}
-          <BiometricPanel
-            ear={liveEar}
-            mar={liveMar}
-            earThreshold={calibratedBaselines.earThreshold}
-            marThreshold={calibratedBaselines.marThreshold}
-            stability={stats.stability || 1.0}
-            blinksPerMinute={blinksPerMinute}
+          <FocusTimer 
+            onSessionComplete={(count) => addLog(`Focus Session #${count} Complete`, 'success')} 
+            addLog={addLog}
+            onBreakStart={() => setShowBrainGame(true)}
           />
 
-          {/* Focus Timer */}
-          <FocusTimer addLog={addLog} />
+          <InsightsHeatmap />
+
+          {/* Advanced Settings Link */}
+          <button 
+            onClick={() => { setShowProfile(false); setShowSettings(true); }}
+            className="mt-4 flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-xl hover:bg-white/[0.05] transition-colors group"
+          >
+            <span className="text-xs font-bold text-slate-300">View Advanced Telemetry</span>
+            <span className="text-[#00e5ff] font-black">&rarr;</span>
+          </button>
 
           {/* AI Recommendations */}
           <div className="glass-panel p-5 border-l-4 border-l-amber-500 bg-amber-500/[0.03]">
@@ -1037,6 +1203,25 @@ const App = () => {
                         <div className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${mod.state ? 'left-5' : 'left-1'}`} />
                       </button>
                     </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Low Light Evasion Config */}
+              <div className="flex flex-col gap-3">
+                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Low Light Flashlight Style</h3>
+                <div className="flex gap-2 bg-white/[0.03] p-3 rounded-xl border border-white/5">
+                  {[
+                    { id: 'stark', label: 'Stark White' },
+                    { id: 'aura', label: 'Blurred Aura' }
+                  ].map((styleOpt) => (
+                    <button 
+                      key={styleOpt.id} 
+                      onClick={() => setFlashlightStyle(styleOpt.id)} 
+                      className={`flex-1 py-2 text-xs font-black rounded-lg uppercase tracking-wider transition-all ${flashlightStyle === styleOpt.id ? 'bg-[#00e5ff] text-black shadow-[0_0_15px_rgba(0,229,255,0.35)]' : 'bg-black/50 border border-white/10 text-slate-400 hover:bg-white/10 hover:text-white'}`}
+                    >
+                      {styleOpt.label}
+                    </button>
                   ))}
                 </div>
               </div>

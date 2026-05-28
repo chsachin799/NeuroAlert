@@ -286,14 +286,14 @@ class FatigueEngine:
         stability = max(0.0, 1.0 - (total_variance * 800)) 
         return round(stability, 2)
 
-    def get_cli_score(self, ear, mar, stability=1.0, reaction_time=0.3, face_missing_in_darkness=False):
+    def get_cli_score(self, ear, mar, stability=1.0, reaction_time=0.3, face_missing_in_darkness=False, face_missing=False):
         """
         Calculate Cognitive Load Index (0-100) and identify triggers.
         """
         self.triggers = []
         
         # Anti-Evasion Check
-        if face_missing_in_darkness:
+        if face_missing_in_darkness or face_missing:
             self.triggers.append("Camera Blocked / Dark Evasion")
             return 100.0, self.triggers
             

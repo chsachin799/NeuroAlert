@@ -246,7 +246,7 @@ async def fatigue_websocket(websocket: WebSocket):
             is_calibrating = message.get("isCalibrating", False)
             calibration_step = message.get("calibrationStep", "none")
             reaction_time = message.get("reactionTime")
-            face_missing = message.get("faceMissingInDarkness", False)
+            face_missing = message.get("faceMissingInDarkness", False) or message.get("face_missing", False) or message.get("faceMissing", False)
 
             if reaction_time is not None:
                 session["last_reaction_time"] = reaction_time
