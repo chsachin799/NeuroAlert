@@ -173,6 +173,7 @@ async def fatigue_websocket(websocket: WebSocket):
             if action == "reset":
                 engine.blink_count = 0
                 engine.yawn_count = 0
+                engine.blink_timestamps.clear()
                 engine.consecutive_closed_frames = 0
                 engine.consecutive_open_mouth_frames = 0
                 engine.last_mar_state = False

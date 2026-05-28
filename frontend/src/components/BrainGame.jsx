@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { Brain, Zap, Clock, X, Check, XCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { motion, useDragControls } from 'framer-motion';
+import { Brain, Zap, Clock, X, Check, XCircle, Award, GripHorizontal } from 'lucide-react';
 
 const COLORS = [
   { name: 'RED', hex: '#ef4444' },
@@ -18,6 +18,8 @@ const BrainGame = ({ onClose, onComplete }) => {
   const [currentColor, setCurrentColor] = useState(null);
   const [options, setOptions] = useState([]);
   const [feedback, setFeedback] = useState(null);
+  const constraintsRef = useRef(null);
+  const dragControls = useDragControls();
 
   const generateRound = useCallback(() => {
     const wordIdx = Math.floor(Math.random() * COLORS.length);
@@ -34,7 +36,6 @@ const BrainGame = ({ onClose, onComplete }) => {
     setCurrentColor(COLORS[colorIdx]);
 
     // Generate options (correct color + 3 random ones)
-    const correctHex = COLORS[colorIdx].hex;
     const shuffledOptions = [COLORS[colorIdx]];
     
     while(shuffledOptions.length < 4) {
@@ -79,123 +80,395 @@ const BrainGame = ({ onClose, onComplete }) => {
   };
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.95 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      className="glass-panel p-6"
+    /* Full-screen overlay that acts as drag constraint boundary */
+    <div
+      ref={constraintsRef}
       style={{
         position: 'fixed',
-        top: '50%', left: '50%',
-        transform: 'translate(-50%, -50%)',
-        width: '400px',
+        inset: 0,
         zIndex: 100,
-        background: 'rgba(15, 23, 42, 0.95)',
-        border: '1px solid rgba(59, 130, 246, 0.5)',
-        boxShadow: '0 0 40px rgba(59, 130, 246, 0.2)'
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0, 0, 0, 0.35)',
+        backdropFilter: 'blur(3px)',
+      }}
+      onClick={(e) => {
+        // Close when clicking the backdrop (not the modal itself)
+        if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-2">
-          <Brain className="text-blue-400" size={24} />
-          <h2 className="text-white font-bold text-lg tracking-wider">COGNITIVE WAKE-UP</h2>
-        </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
-          <X size={20} />
-        </button>
-      </div>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        drag
+        dragConstraints={constraintsRef}
+        dragElastic={0}
+        dragMomentum={false}
+        dragControls={dragControls}
+        dragListener={false}
+        className="glass-panel"
+        style={{
+          width: '420px',
+          maxWidth: 'calc(100vw - 32px)',
+          height: '480px',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'rgba(15, 23, 42, 0.97)',
+          border: '1px solid rgba(59, 130, 246, 0.5)',
+          boxShadow: '0 0 60px rgba(59, 130, 246, 0.25), 0 25px 50px rgba(0, 0, 0, 0.5)',
+          cursor: 'default',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* ── Drag Handle Header ── */}
+        <div
+          onPointerDown={(e) => dragControls.start(e)}
+          style={{
+            padding: '16px 20px 0 20px',
+            cursor: 'grab',
+            userSelect: 'none',
+          }}
+          onMouseDown={(e) => e.currentTarget.style.cursor = 'grabbing'}
+          onMouseUp={(e) => e.currentTarget.style.cursor = 'grab'}
+        >
+          {/* Drag indicator dots */}
+          <div style={{
+            display: 'flex',
+            justifyContent: 'center',
+            marginBottom: '12px',
+          }}>
+            <GripHorizontal size={20} style={{ color: 'rgba(100, 116, 139, 0.5)' }} />
+          </div>
 
-      {gameState === 'start' && (
-        <div className="text-center py-8">
-          <Zap className="mx-auto text-yellow-400 mb-4" size={48} />
-          <h3 className="text-xl font-bold text-white mb-2">Stroop Test</h3>
-          <p className="text-slate-400 text-sm mb-6 px-4">
-            Click the color of the INK, not the word itself. 
-            This forces your brain to override automatic reading habits.
-          </p>
-          <button 
-            onClick={startGame}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold tracking-widest transition-all shadow-[0_0_15px_rgba(37,99,235,0.5)]"
-          >
-            START (30s)
-          </button>
-        </div>
-      )}
-
-      {gameState === 'playing' && currentWord && (
-        <div className="text-center">
-          <div className="flex justify-between items-center px-4 mb-8 bg-slate-800/50 p-3 rounded-lg border border-slate-700">
-            <div className="flex items-center gap-2">
-              <Clock className="text-slate-400" size={16} />
-              <span className={`font-mono text-xl ${timeLeft <= 5 ? 'text-red-400 animate-pulse' : 'text-blue-400'}`}>
-                {timeLeft}s
-              </span>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '20px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Brain className="text-blue-400" size={24} />
+              <h2 style={{
+                color: '#fff',
+                fontWeight: 700,
+                fontSize: '1.1rem',
+                letterSpacing: '0.1em',
+                margin: 0,
+              }}>
+                COGNITIVE WAKE-UP
+              </h2>
             </div>
-            <div className="font-mono text-xl text-yellow-400">Score: {score}</div>
-          </div>
-
-          <div className="h-32 flex items-center justify-center relative">
-            <h1 
-              style={{ color: currentColor.hex }}
-              className="text-6xl font-black tracking-tight"
+            <button
+              onClick={onClose}
+              style={{
+                background: 'rgba(100, 116, 139, 0.2)',
+                border: '1px solid rgba(100, 116, 139, 0.3)',
+                borderRadius: '8px',
+                padding: '6px',
+                cursor: 'pointer',
+                color: '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = '#fff';
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.3)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = '#94a3b8';
+                e.currentTarget.style.background = 'rgba(100, 116, 139, 0.2)';
+                e.currentTarget.style.borderColor = 'rgba(100, 116, 139, 0.3)';
+              }}
             >
-              {currentWord.name}
-            </h1>
-            
-            {feedback === 'correct' && (
-              <motion.div initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} className="absolute absolute-center">
-                <Check className="text-green-500 opacity-50" size={100} />
-              </motion.div>
-            )}
-            {feedback === 'wrong' && (
-              <motion.div initial={{ opacity: 0, scale: 0 }} animate={{ opacity: 1, scale: 1 }} className="absolute absolute-center">
-                <XCircle className="text-red-500 opacity-50" size={100} />
-              </motion.div>
-            )}
+              <X size={16} />
+            </button>
           </div>
+        </div>
 
-          <div className="grid grid-cols-2 gap-3 mt-8">
-            {options.map((opt, i) => (
-              <button
-                key={i}
-                onClick={() => handleGuess(opt.hex)}
-                className="py-4 rounded-lg font-bold text-lg border transition-all hover:scale-105 active:scale-95"
+        {/* ── Content Area ── */}
+        <div style={{ padding: '0 20px 20px 20px', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+
+          {/* ── Start Screen ── */}
+          {gameState === 'start' && (
+            <div style={{ textAlign: 'center', padding: '24px 0' }}>
+              <div style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                background: 'rgba(234, 179, 8, 0.1)',
+                border: '1px solid rgba(234, 179, 8, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px auto',
+              }}>
+                <Zap className="text-yellow-400" size={36} />
+              </div>
+              <h3 style={{
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                color: '#fff',
+                marginBottom: '8px',
+              }}>
+                Stroop Test
+              </h3>
+              <p style={{
+                color: '#94a3b8',
+                fontSize: '0.875rem',
+                lineHeight: '1.5',
+                marginBottom: '24px',
+                padding: '0 16px',
+              }}>
+                Click the color of the <strong style={{ color: '#00e5ff' }}>INK</strong>, not the word itself.
+                This forces your brain to override automatic reading habits.
+              </p>
+              <button 
+                onClick={startGame}
                 style={{
-                  background: 'rgba(30, 41, 59, 0.8)',
-                  borderColor: opt.hex,
-                  color: opt.hex,
-                  boxShadow: `0 0 10px ${opt.hex}20`
+                  padding: '12px 32px',
+                  background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                  border: 'none',
+                  color: '#fff',
+                  borderRadius: '12px',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  letterSpacing: '0.15em',
+                  cursor: 'pointer',
+                  boxShadow: '0 0 20px rgba(59, 130, 246, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)',
+                  transition: 'all 0.25s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 0 30px rgba(59, 130, 246, 0.6), 0 8px 20px rgba(0, 0, 0, 0.4)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 0 20px rgba(59, 130, 246, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3)';
                 }}
               >
-                {opt.name}
+                START (30s)
               </button>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {gameState === 'complete' && (
-        <div className="text-center py-8">
-          <Award className="mx-auto text-yellow-400 mb-4" size={48} />
-          <h3 className="text-2xl font-bold text-white mb-2">Test Complete!</h3>
-          <p className="text-slate-400 mb-6">Final Score: <span className="text-blue-400 font-bold text-xl">{score}</span></p>
-          <div className="flex gap-4 justify-center">
-            <button 
-              onClick={startGame}
-              className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-bold"
-            >
-              Try Again
-            </button>
-            <button 
-              onClick={onClose}
-              className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold"
-            >
-              Back to Work
-            </button>
-          </div>
+          {/* ── Playing Screen ── */}
+          {gameState === 'playing' && currentWord && (
+            <div style={{ textAlign: 'center' }}>
+              {/* Timer & Score Bar */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 16px',
+                marginBottom: '20px',
+                background: 'rgba(30, 41, 59, 0.6)',
+                borderRadius: '10px',
+                border: '1px solid rgba(51, 65, 85, 0.6)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Clock style={{ color: '#94a3b8' }} size={16} />
+                  <span style={{
+                    fontFamily: "'JetBrains Mono', monospace",
+                    fontSize: '1.15rem',
+                    fontWeight: 600,
+                    color: timeLeft <= 5 ? '#ef4444' : '#60a5fa',
+                    animation: timeLeft <= 5 ? 'pulse 1s ease-in-out infinite' : 'none',
+                  }}>
+                    {timeLeft}s
+                  </span>
+                </div>
+                <div style={{
+                  fontFamily: "'JetBrains Mono', monospace",
+                  fontSize: '1.15rem',
+                  fontWeight: 600,
+                  color: '#facc15',
+                }}>
+                  Score: {score}
+                </div>
+              </div>
+
+              {/* Color Word Display */}
+              <div style={{
+                height: '120px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                position: 'relative',
+              }}>
+                <h1 
+                  style={{
+                    color: currentColor.hex,
+                    fontSize: '3.5rem',
+                    fontWeight: 900,
+                    letterSpacing: '-0.02em',
+                    margin: 0,
+                    textShadow: `0 0 30px ${currentColor.hex}40`,
+                  }}
+                >
+                  {currentWord.name}
+                </h1>
+                
+                {feedback === 'correct' && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <Check style={{ color: '#22c55e', opacity: 0.5 }} size={100} />
+                  </motion.div>
+                )}
+                {feedback === 'wrong' && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    style={{
+                      position: 'absolute',
+                      top: '50%',
+                      left: '50%',
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <XCircle style={{ color: '#ef4444', opacity: 0.5 }} size={100} />
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Answer Buttons */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: '1fr 1fr',
+                gap: '12px',
+                marginTop: '20px',
+              }}>
+                {options.map((opt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleGuess(opt.hex)}
+                    style={{
+                      padding: '14px 8px',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                      background: 'rgba(30, 41, 59, 0.8)',
+                      border: `1.5px solid ${opt.hex}`,
+                      color: opt.hex,
+                      cursor: 'pointer',
+                      boxShadow: `0 0 12px ${opt.hex}20`,
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                      e.currentTarget.style.boxShadow = `0 0 20px ${opt.hex}40`;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.boxShadow = `0 0 12px ${opt.hex}20`;
+                    }}
+                  >
+                    {opt.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Complete Screen ── */}
+          {gameState === 'complete' && (
+            <div style={{ textAlign: 'center', padding: '24px 0' }}>
+              <div style={{
+                width: '72px',
+                height: '72px',
+                borderRadius: '50%',
+                background: 'rgba(234, 179, 8, 0.1)',
+                border: '1px solid rgba(234, 179, 8, 0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px auto',
+              }}>
+                <Award style={{ color: '#facc15' }} size={36} />
+              </div>
+              <h3 style={{
+                fontSize: '1.5rem',
+                fontWeight: 700,
+                color: '#fff',
+                marginBottom: '8px',
+              }}>
+                Test Complete!
+              </h3>
+              <p style={{
+                color: '#94a3b8',
+                marginBottom: '24px',
+                fontSize: '1rem',
+              }}>
+                Final Score: <span style={{
+                  color: '#60a5fa',
+                  fontWeight: 700,
+                  fontSize: '1.25rem',
+                }}>{score}</span>
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                <button 
+                  onClick={startGame}
+                  style={{
+                    padding: '10px 24px',
+                    background: 'rgba(51, 65, 85, 0.8)',
+                    border: '1px solid rgba(71, 85, 105, 0.6)',
+                    color: '#fff',
+                    borderRadius: '10px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(71, 85, 105, 0.9)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(51, 65, 85, 0.8)';
+                  }}
+                >
+                  Try Again
+                </button>
+                <button 
+                  onClick={onClose}
+                  style={{
+                    padding: '10px 24px',
+                    background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                    border: 'none',
+                    color: '#fff',
+                    borderRadius: '10px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    boxShadow: '0 0 15px rgba(59, 130, 246, 0.3)',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 25px rgba(59, 130, 246, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 15px rgba(59, 130, 246, 0.3)';
+                  }}
+                >
+                  Back to Work
+                </button>
+              </div>
+            </div>
+          )}
+
         </div>
-      )}
-    </motion.div>
+      </motion.div>
+    </div>
   );
 };
 

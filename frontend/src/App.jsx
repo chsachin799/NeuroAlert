@@ -1012,6 +1012,16 @@ const App = () => {
             <CircularGauge value={cliScore} size={200} label="Fatigue Index" status={status} />
           </div>
 
+          {/* Live Biometrics Panel */}
+          <BiometricPanel
+            ear={liveEar}
+            mar={liveMar}
+            earThreshold={calibratedBaselines.earThreshold}
+            marThreshold={calibratedBaselines.marThreshold}
+            stability={stats.stability}
+            blinksPerMinute={blinksPerMinute}
+          />
+
           <FocusTimer 
             onSessionComplete={(count) => addLog(`Focus Session #${count} Complete`, 'success')} 
             addLog={addLog}

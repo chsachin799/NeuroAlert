@@ -8,6 +8,7 @@ class FatigueEngine:
         
         self.blink_count = 0
         self.yawn_count = 0
+        self.blink_timestamps = []
         
         # Temporal state counters (at 100ms intervals)
         self.consecutive_closed_frames = 0
@@ -215,10 +216,17 @@ class FatigueEngine:
         if self.cli_history_buffer:
             avg_cli = round(sum(self.cli_history_buffer) / len(self.cli_history_buffer), 2)
         
+        now = time.time()
+        self.blink_timestamps = [t for t in self.blink_timestamps if now - t <= 60]
+        
         blinks_per_minute = 0.0
         if session_duration > 0:
-            minutes_elapsed = session_duration / 60.0
-            blinks_per_minute = round(self.blink_count / max(minutes_elapsed, 0.01), 2)
+            if session_duration < 60:
+                # Scale up to a minute, using a minimum of 5 seconds to avoid initial spikes
+                effective_time = max(session_duration, 5.0)
+                blinks_per_minute = round((len(self.blink_timestamps) / effective_time) * 60.0, 2)
+            else:
+                blinks_per_minute = float(len(self.blink_timestamps))
         
         return {
             "session_duration_seconds": round(session_duration, 1),
@@ -310,6 +318,7 @@ class FatigueEngine:
             # If the eye was closed briefly (< 4 frames), count it as a completed normal blink
             if 0 < self.consecutive_closed_frames < 4:
                 self.blink_count += 1
+                self.blink_timestamps.append(time.time())
             
             self.consecutive_closed_frames = 0
             self.last_ear_state = False
